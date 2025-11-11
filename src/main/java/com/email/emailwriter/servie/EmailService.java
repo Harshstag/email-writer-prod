@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -15,20 +16,38 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Slf4j
 public class EmailService {
 
-    private final WebClient webClient;
-    private final String apiKey;
+    private final String geminiApiUrl;
+    private final String geminiApiKey;
+    private WebClient geminiClient; // replace with real HTTP client
 
+    public EmailService(
+            @Value("${gemini.api.url:}") String geminiApiUrl,
+            @Value("${gemini.api.key:}") String geminiApiKey) {
+        this.geminiApiUrl = geminiApiUrl;
+        this.geminiApiKey = geminiApiKey;
+    }
 
-    public EmailService(WebClient.Builder webClientBuilder, @Value("${gemini.api.url}") String baseUrl,@Value("${gemini.api.key}") String geminiApiKey) {
-
-        this.apiKey = geminiApiKey;
-        this.webClient = webClientBuilder
-                .baseUrl(baseUrl)
+    @PostConstruct
+    public void init() {
+        if (geminiApiUrl == null || geminiApiUrl.isBlank() || geminiApiKey == null || geminiApiKey.isBlank()) {
+            log.error("Missing GEMINI_API_URL or GEMINI_API_KEY. Set them as env vars in Railway or provide defaults.");
+            throw new IllegalStateException("Missing GEMINI_API_URL or GEMINI_API_KEY environment variables");
+        }
+        // initialize actual Gemini HTTP client here
+        this.geminiClient = WebClient.builder()
+                .baseUrl(geminiApiUrl)
+                .defaultHeader("x-goog-api-key", geminiApiKey)
+                .defaultHeader("Content-Type", "application/json")
                 .build();
+        log.info("Gemini WebClient initialized with URL: {}", geminiApiUrl);
     }
 
 
     public String generateEmailReply(EmailRequest emailRequest) {
+
+        if (geminiClient == null) {
+            throw new IllegalStateException("Gemini client not initialized. Set GEMINI_API_URL and GEMINI_API_KEY.");
+        }
 
         String prompt =  buildPrompt(emailRequest);
         log.info( ":::::::::::::::::::: Generated Prompt in Service: {}", prompt);
@@ -48,9 +67,9 @@ public class EmailService {
                 """, prompt);
         log.info(":::::::::::::::::::: Request Body: {}", requestBody);
 
-        String response = webClient.post()
+        String response = geminiClient.post()
                 .uri(uriBuilder -> uriBuilder.path("/v1beta/models/gemini-2.5-flash:generateContent").build())
-                .header("x-goog-api-key",apiKey)
+                .header("x-goog-api-key",geminiApiKey)
                 .header("Content-Type", "application/json")
                 .bodyValue(requestBody)
                 .retrieve()
